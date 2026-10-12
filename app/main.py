@@ -24,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="Warden AI Governance Console", version="2.0.0")
+app = FastAPI(title="Aegis AI Governance Console", version="2.0.0")
 app.include_router(agents_router)
 app.include_router(chat_router)
 app.include_router(audit_router)

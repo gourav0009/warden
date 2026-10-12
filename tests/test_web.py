@@ -148,7 +148,7 @@ def test_frontend_dashboard_view() -> None:
     assert res.status_code == 200
     assert "text/html" in res.headers["content-type"]
     assert "Operator Dashboard" in res.text
-    assert "Warden" in res.text
+    assert "Aegis" in res.text
 
 
 def test_frontend_inbox_view() -> None:

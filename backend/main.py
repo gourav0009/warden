@@ -54,7 +54,7 @@ class MultiDirStaticFiles(StaticFiles):
 def create_app() -> FastAPI:
     """Create and configure the unified Warden FastAPI application."""
     app = FastAPI(
-        title="Warden — AI Agent Governance",
+        title="Aegis — AI Agent Governance",
         description="Unified server for AI agent governance, HITL approvals, telemetry, and audit logs.",
         version="0.1.0",
     )
