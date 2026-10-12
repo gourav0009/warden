@@ -1,13 +1,12 @@
 """Interactive Agent Chat & Interception Console for Aegis.
 
-Allows operators to converse directly with AI agents (CodeAgent, DBAgent, OpsAssistant,
-or custom integrated agents), observe real-time policy evaluation, and review
+Allows operators to converse directly with AI agents (OpsAssistant,
+CodeAgent, DBAgent, or custom integrated agents), observe real-time policy evaluation, and review
 intercepted tool actions with 1-click approvals right in the chat stream.
 """
 
 from __future__ import annotations
 
-import json
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -24,7 +23,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app.audit import EventKind, JOURNAL_STORE, JournalEvent
-from app.sandbox import SANDBOX_RUNS_STORE
 from warden.agent_engine import (
     AGENT_REGISTRY,
     AgentTurnResult,
@@ -63,10 +61,10 @@ DEFAULT_THREAD_ID = "thread_chat_001"
 CHAT_SESSIONS: Dict[str, List[ChatMessage]] = {}
 
 
-def _get_or_create_session(thread_id: str, agent_name: str = "CodeAgent") -> List[ChatMessage]:
+def _get_or_create_session(thread_id: str, agent_name: str = "OpsAssistant") -> List[ChatMessage]:
     """Retrieve existing session messages or initialize with tactical greeting."""
     if thread_id not in CHAT_SESSIONS:
-        agent = AGENT_REGISTRY.get(agent_name) or AGENT_REGISTRY.get("CodeAgent")
+        agent = AGENT_REGISTRY.get(agent_name) or AGENT_REGISTRY.get("OpsAssistant")
         welcome_msg = ChatMessage(
             id=f"msg_{uuid.uuid4().hex[:8]}",
             role="agent",
@@ -84,7 +82,7 @@ def _get_or_create_session(thread_id: str, agent_name: str = "CodeAgent") -> Lis
 
 
 # Seed default session
-_get_or_create_session(DEFAULT_THREAD_ID, "CodeAgent")
+_get_or_create_session(DEFAULT_THREAD_ID, "OpsAssistant")
 
 
 # ==============================================================================
@@ -95,11 +93,11 @@ _get_or_create_session(DEFAULT_THREAD_ID, "CodeAgent")
 async def get_chat_page(
     request: Request,
     thread_id: Optional[str] = Query(DEFAULT_THREAD_ID),
-    agent: Optional[str] = Query("CodeAgent"),
+    agent: Optional[str] = Query("OpsAssistant"),
 ):
     """Render the full interactive Agent Chat console."""
     tid = thread_id or DEFAULT_THREAD_ID
-    messages = _get_or_create_session(tid, agent or "CodeAgent")
+    messages = _get_or_create_session(tid, agent or "OpsAssistant")
     available_agents = AGENT_REGISTRY.list_agents()
     active_agent = AGENT_REGISTRY.get(agent) or available_agents[0]
 
@@ -133,7 +131,7 @@ async def get_chat_page(
 async def send_chat_message(
     request: Request,
     message: str = Form(...),
-    agent_name: str = Form("CodeAgent"),
+    agent_name: str = Form("OpsAssistant"),
     thread_id: str = Form(DEFAULT_THREAD_ID),
 ):
     """Process user message, execute agent turn, apply seam policy interception,
@@ -144,7 +142,7 @@ async def send_chat_message(
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     session = _get_or_create_session(thread_id, agent_name)
-    agent = AGENT_REGISTRY.get(agent_name) or AGENT_REGISTRY.get("CodeAgent")
+    agent = AGENT_REGISTRY.get(agent_name) or AGENT_REGISTRY.get("OpsAssistant")
 
     # 1. Append User Message
     user_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
@@ -268,7 +266,7 @@ async def decide_chat_action(
         thread_id=proposal.get("thread_id") or thread_id,
     )
     ctx = ExecutionContext(
-        actor=target_msg.agent_name or "CodeAgent",
+        actor=target_msg.agent_name or "OpsAssistant",
         thread_id=thread_id,
         checkpoint_step=len(session) + 1,
     )
@@ -290,30 +288,9 @@ async def decide_chat_action(
         target_msg.execution_result = (
             f"Authorized by Operator (Raghav). Dispatched to isolated sandbox and executed successfully."
         )
-
-        # Register run in sandbox store
-        SANDBOX_RUNS_STORE.insert(
-            0,
-            {
-                "id": f"sb_{uuid.uuid4().hex[:6]}",
-                "action_id": action_id,
-                "agent": target_msg.agent_name or "CodeAgent",
-                "tool_name": target_msg.action_proposal.get("name", "tool"),
-                "adapter": "Subprocess (cgroups v2 restricted)",
-                "adapter_short": "cgroups_v2",
-                "command": json.dumps(target_msg.action_proposal.get("payload", {})),
-                "exit_code": 0,
-                "status": "SUCCESS",
-                "duration_ms": 185,
-                "cpu_ms": 38,
-                "peak_memory_mb": 19.4,
-                "scrubbed_secrets_count": 2,
-                "scrubbed_secrets": ["AWS_SECRET_KEY", "JWT_SECRET"],
-                "executed_at": datetime.now(timezone.utc).isoformat(),
-                "stdout": f"[AEGIS-SANDBOX] Action {action_id} executed successfully with operator clearance. Output: {exec_out}",
-                "stderr": "",
-            },
-        )
+        # NOTE: no manual sandbox-store insert here — the executor journaled
+        # EXECUTION_STARTED/ACTION_COMPLETED above, and the Sandbox Runs panel
+        # projects its rows from the journal (app/projections.py).
     else:
         decision = GateDecision(
             gate_id=gate_id,
@@ -337,7 +314,7 @@ async def decide_chat_action(
 @router.post("/chat/reset", response_class=HTMLResponse)
 async def reset_chat_session(
     request: Request,
-    agent_name: str = Form("CodeAgent"),
+    agent_name: str = Form("OpsAssistant"),
 ):
     """Start a fresh chat thread session."""
     new_thread_id = f"thread_chat_{uuid.uuid4().hex[:6]}"
