@@ -104,26 +104,15 @@
         <!-- Chat Topbar -->
         <header class="chat-header-bar">
             <div class="chat-active-agent-info">
-                <div class="agent-live-avatar" id="header-agent-avatar">
-                    {{ active_agent.name[:2]|upper }}
-                </div>
+                <div class="agent-live-avatar avatar-sm" id="header-agent-avatar">{{ active_agent.name[:2]|upper }}</div>
                 <div>
-                    <div class="agent-live-title" id="header-agent-name">{{ active_agent.name }}</div>
-                    <div class="agent-live-meta">
-                        <span id="header-agent-model">{{ active_agent.model }}</span>
-                        <span>•</span>
-                        <span class="pulse-dot" style="width: 5px; height: 5px;"></span>
-                        <span style="color: var(--color-emerald);">Seam Guard Active</span>
-                        <span>•</span>
-                        <span style="color: var(--text-muted);">Thread: {{ thread_id }}</span>
-                    </div>
+                    <div class="agent-live-title title-sm" id="header-agent-name">{{ active_agent.name }}</div>
+                    <div class="agent-live-meta"><span id="header-agent-model">{{ active_agent.model }}</span><span>•</span><span style="color: var(--text-muted);">Thread: {{ thread_id }}</span></div>
                 </div>
+                <span class="guard-inline"><span class="pulse-dot" style="width: 6px; height: 6px;"></span>Seam Guard Active</span>
             </div>
-
             <div class="chat-header-actions">
-                <a href="/inbox" class="btn-icon-toggle audit-btn" style="font-size: 0.75rem; text-decoration: none;">
-                    Interception Queue →
-                </a>
+                <a href="/inbox" class="queue-ghost-link">Interception Queue →</a>
             </div>
         </header>
 
