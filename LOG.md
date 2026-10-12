@@ -1,5 +1,37 @@
 # LOG.md — Warden
 
+## 2026-10-12 — Live governed OpsAssistant wired into chat UI
+
+**Status:** Done (240 passed + 6 skipped full suite, 0 mypy errors across 61 files, live /chat round-trip 200)
+
+Why: `/chat` only talked to canned keyword stubs; the real Phase-1 ops agent
+(live Groq + real tool suite from `scripts/governed_demo.py`) ran CLI-only and
+never appeared in the chat picker.
+
+What changed:
+- `src/warden/agent_engine.py`: `OpsAssistant` is now live — replies via
+  `draft_with_groq` (deterministic stub fallback offline), intent mapped onto
+  real Phase-1 tools (`get_system_metrics`, `read_service_logs`,
+  `query_db_readonly`, `send_email`→POL_EGRESS_EXTERNAL_MSG,
+  `restart_service`→POL_INFRA_MUTATION, `exec_db_mutation`→terminal deny).
+  Same registry name, so picker + existing tests unaffected. Actions cross the
+  existing GuardedExecutor seam in `app/chat.py` (allow/deny/HITL approve UI).
+- `tests/test_governed_chat_agent.py`: 6 new tests (registry, live reply,
+  metrics/email/drop-table mapping, end-to-end POST /chat/message).
+
+Verified: full pytest green, mypy strict clean, restarted `app.main:app` on
+:8000 and POSTed a live metrics prompt as OpsAssistant → 200 with staged
+`get_system_metrics`. Uncommitted (not requested).
+
+Follow-ups in same session (all committed, pushed):
+- `app/projections.py` + panel wiring: sandbox runs + policy evaluations
+  projected from JOURNAL_STORE, so chat turns fill panels dynamically.
+- Chat defaults flipped to OpsAssistant; fabricated approval telemetry
+  removed in favor of journaled completions.
+- `get_clef_client()` factory: live Clef L2 on the GuardedExecutor seam when
+  Cloudflare creds exist, fake otherwise; explicit escalation-rule hints
+  downgrade lone clef-risk DENYs to human gates (rulebook beats ML).
+
 ## 2026-10-12 — GuardedExecutor core seam & full multi-agent UI integration
 
 **Status:** Done (234 passed full suite, 0 mypy errors across 71 files)
