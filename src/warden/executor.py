@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
-from warden.config import get_groq_llm, settings
+from warden.config import get_clef_client, get_groq_llm, settings
 from warden.journal import AuditJournal, EventKind, InMemoryJournal, get_journal
 from warden.llm.client import GuardedLLMClient
 from warden.llm.types import LLMRequest
@@ -76,7 +76,12 @@ class GuardedExecutor:
         llm_provider: Optional[LLMProviderFn] = None,
     ) -> None:
         self.journal: AuditJournal = journal if journal is not None else get_journal()
-        self.policy: PolicyEngine = policy if policy is not None else PolicyEngine()
+        # Production default: live Clef L2 when Cloudflare creds are configured,
+        # hermetic FakeClefClient otherwise (CI-safe). Explicit policies pass
+        # through untouched for unit tests.
+        self.policy: PolicyEngine = (
+            policy if policy is not None else PolicyEngine(clef=get_clef_client())
+        )
         self._sandbox: Optional[SandboxPort] = sandbox
         self.llm_provider: Optional[LLMProviderFn] = llm_provider
         self.telemetry: Dict[str, AgentTelemetry] = {}
@@ -181,6 +186,24 @@ class GuardedExecutor:
                 payload={},
             )
             return Error(reason="governance_unavailable")
+
+        # Rulebook precedence: an explicit escalation-rule hint routes to the
+        # human gate even when L2-Clef alone votes deny. Deterministic rules
+        # (lock 9) win over ML judgment; L0/L1 denies stay terminal, and
+        # clef-risk denies without an explicit rule stay terminal too.
+        policy_hint = action.payload.get("policy_id")
+        if (
+            verdict.decision == PolicyDecision.DENY
+            and verdict.policy == "clef-risk"
+            and str(policy_hint or "") in ("SEC-FS-04", "SEC-DB-02", "SEC-NET-01")
+        ):
+            verdict = PolicyVerdict(
+                decision=PolicyDecision.ESCALATE,
+                reason=f"{verdict.reason} — explicit rule {policy_hint} routes to human gate",
+                policy=str(policy_hint),
+                layer=verdict.layer,
+                scores=verdict.scores,
+            )
 
         self.journal.append(
             EventKind.POLICY_EVALUATED,

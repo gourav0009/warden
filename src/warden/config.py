@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -143,3 +143,24 @@ def get_groq_llm(model: str | None = None) -> ChatOpenAI | None:
         temperature=0.0,
         timeout=10.0,
     )
+
+
+def get_clef_client() -> Any:
+    """Return a live ClefClient when Cloudflare creds are configured.
+
+    Falls back to the hermetic FakeClefClient otherwise, so unit tests and
+    offline environments never touch the network. `Any` keeps mypy strict
+    happy across the Clef/Fake adapter shapes (both expose `judge()`).
+    """
+    from warden.policy.layer_clef import ClefClient, FakeClefClient
+
+    account_id = settings.clef_account_id.strip()
+    token = settings.clef_api_token.get_secret_value().strip() if settings.clef_api_token else ""
+    if account_id and token:
+        return ClefClient(
+            account_id=account_id,
+            api_token=token,
+            model=settings.clef_model,
+            timeout_s=settings.clef_timeout_s,
+        )
+    return FakeClefClient()
