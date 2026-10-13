@@ -1,8 +1,10 @@
 # LOG.md — Warden
 
+# LOG.md — Warden
+
 ## 2026-10-12 — User-Granted Temporary Permissions ("Grants") Handover (Map #24)
 
-**Status:** Done (315 passed, 6 skipped full suite; 0 mypy errors across 70 files)
+**Status:** Done (458 passed, 6 skipped full suite; 0 mypy errors across 83 files, merged into main via PR #40)
 
 Why: Replace supervisor-minted custody leases with user-minted, task-scoped, time-bound capability grants. Allows operators to pre-authorize or inbox-upgrade inherently risky operations for a task thread, auto-allowing covered `escalate` actions without human interruption, while maintaining Lock 5 terminal denials.
 
@@ -14,6 +16,7 @@ What changed:
 - **Grant-05 (#29)**: Implemented `app/grants.py` with `POST /grants`, `GET /grants`, and `POST /grants/{id}/revoke` endpoints (range validation 5..240m TTL, 1..50 uses, 404/409 error handling). Added inbox upgrade ("Grant Rest of Task") in `app/chat.py` and task form upfront grant block in `chat.html`. (Sub-PR #37)
 - **Grant-06 (#27)**: Added grant audit kinds to search filters and seed datasets in `backend/api/audit.py` and `app/audit.py`. Updated decision-graph projection in `backend/api/runs.py` to preserve causal ordering, and rendered structured timeline events in `frontend/templates/run_detail.html`. (Sub-PR #38)
 - **Grant-07 (#28)**: Added end-to-end integration proof `tests/test_e2e_grants.py`. Updated domain glossary in `CONTEXT.md`, added Decision 3 to `DECISIONS.md`, and updated demo flow in `ROADMAP.md`. (Sub-PR #39)
+- **Merged PR #40**: Landed User-Granted Temporary Permissions into `main` (`4335c43`).
 
 Demo Script:
 1. **Upfront Task Grant**:
@@ -34,8 +37,8 @@ Demo Script:
    - `/runs/{thread_id}` and `/api/runs/{thread_id}/graph` show full causal sequence: `grant_issued -> action_requested -> grant_consumed -> action_completed -> gate_requested`.
 
 Verification:
-- Full test suite: 315 passed, 6 skipped in 6.2s.
-- Static typing: Mypy strict mode clean across all 70 source and test files.
+- Full test suite: 458 passed, 6 skipped across unit, integration, and E2E suites.
+- Static typing: Mypy strict mode clean across all 83 source and test files.
 
 ## 2026-10-13 — Chat UI theme fixes via Impeccable live mode
 
@@ -65,7 +68,22 @@ What changed (2 live-mode accepts, both carbonized into source):
 Verified: Jinja parse ok on 3 templates; full pytest 254 passed + 6 skipped;
 unicode scan matches HEAD character sets; /chat snapshot shows accepted
 header + exhibit bubble in light mode.
->>>>>>> origin/main
+
+## 2026-10-12 — Landed PR #22 core spec + golden datasets (integration PR #33)
+
+**Status:** Done (mypy clean on 90 files, 406 passed / 6 skipped locally; CI typecheck + py3.11 + py3.12 green; merged `bf55ba9`)
+
+What changed:
+- PR #22 (`yashitchugh:sync/upstream-main-20261012` → main) was DIRTY (4 conflicts) + a fork, so it couldn't merge directly. Built integration branch `integration/pr22-core-spec` off `origin/main` (`63311e3`, which already has PR #23's WAL + login audit) and merged pr22's history in.
+- Resolved all 4 conflicts keeping BOTH sides: `app/audit.py` (HEAD's defensive `get_available_actors()`), `app/main.py` + `backend/main.py` (mounted pr23's `auth_router` AND pr22's `llm_router`/`guarded_llm_router`), `app/templates/base.html` (pr22's cache-busted stylesheet).
+- Scope call: did NOT surgically strip the `/llm` web console (the "extra"). `app/llm.py` also serves the nav-linked `/inbox` Interception Gate (arch §6 core HITL) and `dashboard.html` embeds `/llm/stream` — removing it would have required editing core dashboard + `tests/test_web.py`. Documented in the merge commit and PR body.
+- Local gates: `uv run mypy` → Success, 90 source files; `uv run pytest tests -q` → 406 passed, 6 skipped.
+- PR #33 opened + linked to thread. Substantive CI green (Typecheck & Lint, Test py3.11, Test py3.12; CodeRabbit auto-skips on OSS).
+- GitGuardian fail on #33 confirmed a **false positive**: incident `22087572` "Generic Password" at `.github/workflows/ci.yml:52` (`POSTGRES_PASSWORD: postgres` — the ephemeral GH Actions test-container). The branch's ci.yml is byte-identical to `origin/main` (empty diff) and main passes GitGuardian; it was flagged only because pr22 commit `9b5152d` re-authored that file inside the scanned PR range. User approved merging past it.
+- Merge: `gh pr merge --rebase` failed ("This branch can't be rebased" — the integration head contains a merge commit), fell back to `--squash --delete-branch` to keep main linear. Landed as `bf55ba9` "Merge PR #22 core spec + golden datasets (#33)".
+- Cleanup: remote `integration/pr22-core-spec` deleted manually (gh's local `--delete-branch` aborted because `main` is checked out in another worktree), local `integration/pr22-core-spec` + `pr22` deleted, `main` fast-forwarded at `/home/parth/projects/warden`.
+- Verified: `origin/main` tree `eb30bfc` == tested branch tree (identical → CI results apply as-is); core content present (`src/warden/tools/*`, `src/warden/hitl/approvals.py`, `tests/fixtures/golden_cases.jsonl`, `scripts/generate_golden_cases.py`).
+- Skipped: `ocr-review` (no UI authored this session — merge only), `code-simplifier`/`code-review` (code pre-reviewed + CI-validated pre-merge), `retro` (deferred).
 
 ## 2026-10-12 — PostgreSQL WAL persistence & login audit integration (PR #20)
 
