@@ -1,8 +1,11 @@
-"""Sandbox tool: exec_shell -> DockerSandbox registry profile "shell" (lock 7).
+"""Sandbox tool: exec_shell -> registry profile "shell" (lock 7).
 
-Spec name exec_shell maps to registry key "shell" (docker adapter looks up
-action.name in the registry). Containment: --network=none, read-only rootfs,
-tmpfs /tmp + /work, 30s/256MB/1CPU, single workspace bind mount.
+Spec name exec_shell maps to registry key "shell" (the sandbox adapter looks
+up action.name in the registry). Backend resolves via create_sandbox():
+subprocess by default (host process: cwd jail, timeout, scrubbed env — no
+network-isolation claim), Docker when WARDEN_SANDBOX_BACKEND=docker
+(--network=none, read-only rootfs, tmpfs /tmp + /work, 30s/256MB/1CPU,
+single workspace bind mount).
 LLM actions skip sandbox (timeout + token accounting only).
 """
 
@@ -10,16 +13,15 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from warden.config import settings
 from warden.models import Action
 from warden.policy.layers_static import find_static_violation
-from warden.sandbox.docker import DockerSandbox
+from warden.sandbox import create_sandbox
 from warden.sandbox.port import SandboxResult, SandboxUnavailable
 from warden.tools.base import ToolContext, ToolSpec, make_action
 
 EXEC_SHELL_SPEC = ToolSpec(
     name="exec_shell",
-    description="Arbitrary shell — contained in Docker sandbox.",
+    description="Arbitrary shell — contained in the configured sandbox backend.",
     payload_schema={"command": "str<=4000"},
     execution_path="sandbox",
     triggers_rule=True,
@@ -34,7 +36,7 @@ IN_PROCESS_ROUTING: dict[str, str] = {
     "query_db_readonly": "in-process",
     "send_email": "in-process-after-approval",
     "restart_service": "in-process-after-approval",
-    "exec_shell": "docker-sandbox",
+    "exec_shell": "subprocess-sandbox",
     "exec_db_mutation": "aborted-on-deny",
     "read_file_sensitive": "aborted-on-deny",
 }
@@ -72,7 +74,7 @@ async def run_shell(
     ctx: ToolContext,
     sandbox: SandboxRunner | None = None,
 ) -> SandboxResult | dict[str, Any]:
-    """Execute in Docker; fail-closed to Error-shaped dict (lock 4), never raise."""
+    """Execute in the configured sandbox backend; fail-closed to Error-shaped dict (lock 4), never raise."""
     try:
         action = to_action(payload, ctx)
     except ValueError as exc:
@@ -81,7 +83,7 @@ async def run_shell(
     if sandbox is not None:
         runner = sandbox
     else:
-        runner = DockerSandbox(workspace_path=settings.sandbox_workspace)
+        runner = create_sandbox()
     try:
         return await runner.run(action)
     except SandboxUnavailable as exc:

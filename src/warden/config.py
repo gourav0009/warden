@@ -86,6 +86,17 @@ class Settings(BaseSettings):
         ),
         description="Override container image (empty string uses registry default).",
     )
+    sandbox_backend: str = Field(
+        default="subprocess",
+        validation_alias=AliasChoices(
+            "WARDEN_SANDBOX_BACKEND",
+            "SANDBOX_BACKEND",
+            "sandbox_backend",
+        ),
+        description="Sandbox execution backend: 'subprocess' (host process, "
+        "Render-safe default) or 'docker' (container isolation, needs daemon). "
+        "Unknown values fail closed at sandbox creation.",
+    )
     clef_account_id: str = Field(
         default="",
         validation_alias=AliasChoices("CLOUDFLARE_ACCOUNT_ID", "CLEF_ACCOUNT_ID", "clef_account_id"),

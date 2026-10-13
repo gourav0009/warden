@@ -53,5 +53,5 @@ async def test_sandbox_down_fail_closed() -> None:
 
 
 def test_routing_table() -> None:
-    assert IN_PROCESS_ROUTING["exec_shell"] == "docker-sandbox"
+    assert IN_PROCESS_ROUTING["exec_shell"] == "subprocess-sandbox"
     assert IN_PROCESS_ROUTING["get_system_metrics"] == "in-process"
