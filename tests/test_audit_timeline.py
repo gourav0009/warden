@@ -129,11 +129,13 @@ def test_run_detail_renders_grant_timeline() -> None:
 
 def test_dynamic_grant_lifecycle_decision_graph_causal_order() -> None:
     from app.audit import JOURNAL_STORE
+    import uuid
 
-    thread = "thr_dyn_causal"
+    suffix = uuid.uuid4().hex[:6]
+    thread = f"thr_dyn_causal_{suffix}"
     events = [
         JournalEvent(
-            id="ev_d1",
+            id=f"ev_d1_{suffix}",
             run_id=f"run_{thread}",
             thread_id=thread,
             action_id=None,
@@ -146,10 +148,10 @@ def test_dynamic_grant_lifecycle_decision_graph_causal_order() -> None:
             ts="2026-10-12T10:00:00Z",
         ),
         JournalEvent(
-            id="ev_d2",
+            id=f"ev_d2_{suffix}",
             run_id=f"run_{thread}",
             thread_id=thread,
-            action_id="act_1",
+            action_id=f"act_1_{suffix}",
             checkpoint_step=2,
             actor="agent",
             status="Proposed",
@@ -159,10 +161,10 @@ def test_dynamic_grant_lifecycle_decision_graph_causal_order() -> None:
             ts="2026-10-12T10:00:01Z",
         ),
         JournalEvent(
-            id="ev_d3",
+            id=f"ev_d3_{suffix}",
             run_id=f"run_{thread}",
             thread_id=thread,
-            action_id="act_1",
+            action_id=f"act_1_{suffix}",
             checkpoint_step=2,
             actor="GuardedExecutor",
             status="Consumed",
@@ -172,10 +174,10 @@ def test_dynamic_grant_lifecycle_decision_graph_causal_order() -> None:
             ts="2026-10-12T10:00:02Z",
         ),
         JournalEvent(
-            id="ev_d4",
+            id=f"ev_d4_{suffix}",
             run_id=f"run_{thread}",
             thread_id=thread,
-            action_id="act_1",
+            action_id=f"act_1_{suffix}",
             checkpoint_step=2,
             actor="GuardedExecutor",
             status="Completed",
@@ -185,10 +187,10 @@ def test_dynamic_grant_lifecycle_decision_graph_causal_order() -> None:
             ts="2026-10-12T10:00:03Z",
         ),
         JournalEvent(
-            id="ev_d5",
+            id=f"ev_d5_{suffix}",
             run_id=f"run_{thread}",
             thread_id=thread,
-            action_id="act_2",
+            action_id=f"act_2_{suffix}",
             checkpoint_step=3,
             actor="agent",
             status="Proposed",
@@ -198,10 +200,10 @@ def test_dynamic_grant_lifecycle_decision_graph_causal_order() -> None:
             ts="2026-10-12T10:00:04Z",
         ),
         JournalEvent(
-            id="ev_d6",
+            id=f"ev_d6_{suffix}",
             run_id=f"run_{thread}",
             thread_id=thread,
-            action_id="act_2",
+            action_id=f"act_2_{suffix}",
             checkpoint_step=3,
             actor="GuardedExecutor",
             status="Consumed",
@@ -211,10 +213,10 @@ def test_dynamic_grant_lifecycle_decision_graph_causal_order() -> None:
             ts="2026-10-12T10:00:05Z",
         ),
         JournalEvent(
-            id="ev_d7",
+            id=f"ev_d7_{suffix}",
             run_id=f"run_{thread}",
             thread_id=thread,
-            action_id="act_2",
+            action_id=f"act_2_{suffix}",
             checkpoint_step=3,
             actor="GuardedExecutor",
             status="Completed",
@@ -224,10 +226,10 @@ def test_dynamic_grant_lifecycle_decision_graph_causal_order() -> None:
             ts="2026-10-12T10:00:06Z",
         ),
         JournalEvent(
-            id="ev_d8",
+            id=f"ev_d8_{suffix}",
             run_id=f"run_{thread}",
             thread_id=thread,
-            action_id="act_3",
+            action_id=f"act_3_{suffix}",
             checkpoint_step=4,
             actor="agent",
             status="Proposed",
@@ -237,10 +239,10 @@ def test_dynamic_grant_lifecycle_decision_graph_causal_order() -> None:
             ts="2026-10-12T10:00:07Z",
         ),
         JournalEvent(
-            id="ev_d9",
+            id=f"ev_d9_{suffix}",
             run_id=f"run_{thread}",
             thread_id=thread,
-            action_id="act_3",
+            action_id=f"act_3_{suffix}",
             checkpoint_step=4,
             actor="GuardedExecutor",
             status="Pending",
