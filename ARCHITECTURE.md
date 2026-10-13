@@ -42,7 +42,7 @@ outcome = await executor.execute(action, ctx)
 6. return Allowed(result) | Error(...)
 ```
 
-**Re-entry helper** (`warden/hitl/runner.py`, written ONCE, lock 2):
+**Re-entry helper** (`src/warden/hitl/approvals.py` + executor grant/approval path, written ONCE, lock 2):
 
 ```python
 outcome = await run_gated(action, ctx)   # called from graph nodes
@@ -58,32 +58,38 @@ Journal idempotency (step 1 key) is what makes the node's re-run on resume safe.
 ## 4. Package layout
 
 ```
-warden/
-  warden/
-    executor.py         # GuardedExecutor — the seam
-    models.py           # Action, Outcome, journal event types
-    journal.py          # AuditJournal: append(), query(), idempotent key
-    policy/
-      engine.py         # PolicyEngine.evaluate -> Layered L0 (Static) -> L1 (DeBERTa) -> L2 (Granite Guardian)
-      store.py          # DB rows + pgvector retrieval adapter
-      versions.py       # append-only policy_versions (lock 9 guardrail)
-    hitl/
-      gate.py           # gate request/decision types
-      runner.py         # THE re-entry helper
-    sandbox/           # SandboxPort interface (port.py), registry (registry.py), Docker adapter (docker.py)
-    llm.py              # LLM client adapter (usage -> journal)
-    projections/        # telemetry.py, inbox.py, decision_graph.py — pure funcs
-  app/
-    main.py             # FastAPI app
-    api/                # JSON endpoints (below)
-    views/              # Jinja templates + HTMX (lock 12)
-  agents/
-    ops_assistant.py    # phase 1 graph
-  policies/seed/        # seed rules, loaded on first boot (lock 9)
-  tests/
+src/warden/
+  executor.py         # GuardedExecutor — the seam
+  models.py           # Action, Outcome, journal event types
+  journal.py          # AuditJournal: append(), query(), idempotent key, hash chain, secret redaction
+  grants.py           # GrantsStore: task-scoped, time-bound user grants (escalate path only)
+  agent_engine.py     # OpsAssistant + multi-agent registry (governed chat agents)
+  config.py           # pydantic-settings (Groq, Postgres, sandbox, Clef, gate thresholds)
+  checkpoint.py       # CheckpointManager (LangGraph checkpointer lifecycle)
+  demo_graph.py       # draft→approval→send/abort demo graph
+  policy/
+    engine.py         # PolicyEngine.evaluate -> L0 (static AST) -> L1 (DeBERTa) -> L2 (Clef/Graphite Guardian)
+    layers_static.py  # sqlglot/bashlex/path/key rules + scoped-escalation classifiers
+    layer_deberta.py  # injection scorer (fake hermetic default)
+    layer_clef.py     # Cloudflare Clef L2 client + FakeClefClient fallback
+  hitl/
+    approvals.py      # durable approval store (SQLite), one-time claim, fingerprint binding
+  sandbox/            # SandboxPort interface (port.py), registry (registry.py), Docker adapter (docker.py)
+  llm/                # LLM client adapter (client.py, types.py, budget.py, pricing.py, providers.py, rate_limiter.py, tokenizer.py)
+  tools/              # governed tool implementations (registry.py, router.py, safe/deny/hitl/sandbox/database/filesystem/logs/metrics)
+  projections/        # telemetry.py, inbox.py, decision_graph.py — pure funcs
+app/
+  main.py             # FastAPI app (Aegis console v2) — dashboard, approvals, blast-radius, run launcher
+  agents.py chat.py grants.py audit.py policies.py leases.py traces.py sandbox.py llm.py projections.py workflow.py
+backend/
+  main.py             # alternate/legacy app entry
+  api/                # JSON API: runs, inbox, audit, telemetry, policies, llm, auth, health
+frontend/
+  views.py templates/ static/  # server-rendered views (Jinja + HTMX, lock 12)
+tests/                # 40 modules — executor, policy_gate, grants/e2e, hitl_approvals, sandbox_docker/integration, llm_client, golden evals, app/api UI
 ```
 
-Dependency rule: `warden/` imports nothing from `app/` or `agents/`. The governance kernel is a library; FastAPI and graphs are its callers.
+Dependency rule: `src/warden/` imports nothing from `app/`, `backend/`, or `frontend/`. The governance kernel is a library; FastAPI and graphs are its callers.
 
 ## 5. Data model (Postgres + pgvector, one store)
 
@@ -99,15 +105,21 @@ Approvals inbox, telemetry cards, decision graph, leaderboard = **projections** 
 ## 6. HTTP surface (JSON-clean, HTMX renders them)
 
 ```
-POST /runs                      start a thread (agent id in body)
-GET  /runs/{thread_id}          status + timeline (projection)
-GET  /inbox                     pending gate requests (HTMX partial)
-POST /gates/{gate_id}/decision  {verdict: approve|deny, reason} + Warden-Key header
-GET  /audit?q=&run=&kind=       searchable audit log
-GET  /runs/{thread_id}/graph    decision-graph projection (joined to checkpoints)
-GET  /dashboard                 telemetry: cost, latency, tool usage
-# phase 2:
-GET/POST /policies              list/create; POST /policies/{id} appends a version
+GET  /                                dashboard (live journal + telemetry + pending gates + runs)
+POST /dashboard/runs                  launch a task (prompt -> LangGraph run)
+GET  /approvals                       approval triage queue (HTMX)
+GET  /actions/{action_id}             blast-radius analysis for a proposed action
+POST /runs                            start a thread (agent id in body)
+GET  /runs/{thread_id}                status + timeline (projection)
+GET  /inbox                           pending gate requests (HTMX partial + JSON API under /api/inbox)
+POST /gates/{gate_id}/decision        {verdict: approve|deny, reason} + named-key header
+GET  /audit?q=&run=&kind=             searchable audit log
+GET  /runs/{thread_id}/graph          decision-graph projection (joined to checkpoints)
+GET  /dashboard                       telemetry: cost, latency, tool usage
+POST /grants / GET /grants / revoke   user grants: issue/list/revoke task-scoped capabilities
+GET/POST /policies                    list/create; POST /policies/{id} appends a version
+GET  /chat / POST /chat               governed OpsAssistant chat (Groq default, executor-enforced)
+GET  /traces / /sandbox / /llm       traces, sandbox runs, LLM usage views
 ```
 
 Approve flow: append `gate_decided` event → `graph.invoke(Command(resume=...), config)` → run continues from the parked node.

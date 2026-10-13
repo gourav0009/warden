@@ -15,7 +15,7 @@ Status: **design grilling in progress.** Decisions below are LOCKED — do not r
 | **Gate (HITL)** | Human approval point. Expressed as `Pending(gate_request)`; parked by the re-entry helper. |
 | **Grant (Capability)** | Human-issued, task-scoped, time-bound capability auto-allowing covered `escalate` actions without human parking. |
 | **Custody lease (dropped)** | Yash PR-16 supervisor-minted specialist assignment token; dropped in favor of user grants. |
-| **Re-entry helper** | The single function (in `governance/hitl/`) that runs `execute()` → parks on `Pending` → resumes with the human decision → re-calls `execute()`. Every demo graph calls this; nobody rewrites it. |
+| **Re-entry helper** | The single approval path (in `src/warden/hitl/` + `GuardedExecutor.execute(approval=...)`) that runs `execute()` → parks on `Pending` → resumes with the human decision → re-calls `execute()`. Every demo graph calls this; nobody rewrites it. |
 | **AuditJournal** | Append-only event store. Source of truth for telemetry, search, decision graph, approvals inbox. |
 | **Projection** | Pure function `events -> view`. Cost rollup, latency, decision graph, approvals inbox are all projections. |
 | **Checkpointer** | LangGraph's durable store. Owns *where a run is parked* + resume values. Never parsed for audit — journal owns *what happened*. |
@@ -29,7 +29,7 @@ Status: **design grilling in progress.** Decisions below are LOCKED — do not r
 3. **Write-ahead + checkpointer division of labor.** `action_requested` appended *before* the gate, keyed `(run_id, action_id)` → idempotent no-op when LangGraph re-runs the node. Checkpointer = control-flow fault tolerance (park/resume). Journal = evidence. Approvals inbox reads journal projection, never checkpoint state.
 4. **Fail-closed.** Governance store unavailable → `Error(governance_unavailable)`, distinct from `Denied`. Interface invariant: `execute()` never raises for environmental reasons — only bugs raise.
 5. **DENY is terminal.** No human override of a policy `deny`. Humans only resolve `escalate`. Wrong rule → edit the policy (versioned, audited).
-6. **Standalone repo:** `D:\work\projects\ps5-governance` — own git history, clean for hackathon submission.
+6. **Repo:** `https://github.com/parth5012/warden` (branch `main`) — own git history, clean for hackathon submission.
 7. **One sandbox port, Docker containment.** (Reopened 2026-10-11, DECISIONS.md entry 1). Every tool action calls `sandbox.run(action)`; inside the adapter, code/shell/file tools → Docker container (--network=none, read-only rootfs, 256MB/1 CPU/30s caps, tmpfs, single workspace bind mount, SandboxUnavailable fail-closed), API tools → in-process. LLM actions skip sandbox — timeout + token accounting only. Subprocess adapter dropped.
 8. **Approver identity = named keys.** A few `name:key` pairs in an env file, sent as a header. `approver: alice` must be a true statement in the journal. Not real auth, doesn't pretend to be. No login system.
 9. **Policies live in the DB.** One store tells the whole accountability story (actions, approvals, rule changes). Guardrail: append-only `policy_versions` table (`policy_id, version, content, who, when`) — lock 5's "edits are logged" promise. Repo ships seed policies loaded on first boot; after that, DB owns the truth. pgvector index lives beside the rows — atomic, no file-sync pipeline.

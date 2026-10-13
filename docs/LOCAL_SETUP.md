@@ -37,26 +37,22 @@ uv run python -c "import langgraph, psycopg, warden; print('Installation OK')"
 No additional setup needed. pgserver starts automatically.
 
 ```bash
-uv run pytest
+$env:PYTHONPATH='src'; uv run pytest
 ```
 
-Expected output:
-```
-22 passed in X.XXs
-```
+Expected output: 200+ collected tests (40 modules). Some app/backend modules
+require full deps (`psycopg`, `sqlglot`, `langgraph-checkpoint-postgres`) —
+install with `uv sync --extra dev` from a clean venv; see SETUP.md.
 
 ---
 
 ## Step 3 — Type Check
 
 ```bash
-uv run mypy src tests
+$env:PYTHONPATH='src'; uv run mypy src tests
 ```
 
-Expected output:
-```
-Success: no issues found in 12 source files
-```
+Strict mode over `src`, `tests`, `backend`, `frontend` (see `pyproject.toml`).
 
 ---
 
@@ -90,14 +86,23 @@ uv run python tests/cli_chat.py --thread <thread-id-from-terminal-1>
 
 ```bash
 # Override the PostgreSQL URI (default: bundled pgserver)
-export WARDEN_PG_URI=postgresql://postgres:@/postgres?host=/tmp/warden-pg
+$env:WARDEN_PG_URI='postgresql://postgres:@/postgres?host=/tmp/warden-pg'
 
-# Named approver keys (required for Phase 1 FastAPI approval API)
-export WARDEN_APPROVER_KEYS=alice:key-abc123,bob:key-def456
+# Named approver keys (required for approval API)
+$env:WARDEN_APPROVER_KEYS='alice:key-abc123,bob:key-def456'
 
-# LLM provider (required for Phase 1 LLM integration)
-export OPENAI_API_KEY=sk-...
-export WARDEN_LLM_PROVIDER=openai
+# LLM provider (Groq default for governed chat; OpenAI/Anthropic optional)
+$env:GROQ_API_KEY='gsk-...'
+$env:GROQ_MODEL='openai/gpt-oss-20b'
+$env:OPENAI_API_KEY='sk-...'
+
+# Cloudflare Clef L2 (optional — FakeClefClient is used when unset, fail-closed on outage)
+$env:CLOUDFLARE_ACCOUNT_ID='...'
+$env:CLOUDFLARE_API_TOKEN='...'
+
+# Sandbox container
+$env:WARDEN_SANDBOX_WORKSPACE='D:/tmp'
+$env:WARDEN_SANDBOX_IMAGE='python:3.11-slim'
 ```
 
 Create a `.env` file for local development (it is in `.gitignore`):
@@ -111,16 +116,17 @@ OPENAI_API_KEY=sk-...
 
 ---
 
-## Starting the FastAPI App (Phase 1 — Not Yet Implemented)
-
-Once the FastAPI app is built (Phase 1), the startup command will be:
+## Starting the FastAPI App (implemented)
 
 ```bash
-# PROPOSED — not yet available
+$env:PYTHONPATH='src'
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-The dashboard will be available at `http://localhost:8000`.
+The dashboard is at `http://localhost:8000` (live journal + telemetry +
+pending gates + runs). JSON API under `/api/` (runs, inbox, audit,
+telemetry, policies, llm, health). See `SETUP.md` for env vars
+(`GROQ_API_KEY`, `WARDEN_APPROVER_KEYS`, Clef, sandbox).
 
 ---
 
