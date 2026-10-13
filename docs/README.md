@@ -73,20 +73,20 @@ Each slice corresponds to a major feature area. All are under [`features/`](feat
 
 | # | Slice | Owner workstream | Phase | Status |
 |---|---|---|---|---|
-| 01 | [UI and Operator Dashboard](features/01_ui_dashboard/README.md) | A | 1 | Planned |
-| 02 | [FastAPI Application and HTTP](features/02_fastapi_http/README.md) | B | 1 | Planned |
-| 03 | [GuardedExecutor](features/03_guarded_executor/README.md) | C | 1 | Planned |
-| 04 | [PolicyEngine](features/04_policy_engine/README.md) | C | 1 | Planned |
-| 05 | [HITL Approval and Re-entry](features/05_hitl_approval/README.md) | D | 1 | Partially implemented |
-| 06 | [Ops-Assistant Agent](features/06_ops_assistant_agent/README.md) | D | 1 | Planned |
-| 07 | [SandboxPort](features/07_sandbox/README.md) | E | 1 | Planned |
-| 08 | [AuditJournal](features/08_audit_journal/README.md) | E | 1 | Planned |
+| 01 | [UI and Operator Dashboard](features/01_ui_dashboard/README.md) | A | 1 | Implemented (`app/main.py` dashboard + approvals + blast-radius) |
+| 02 | [FastAPI Application and HTTP](features/02_fastapi_http/README.md) | B | 1 | Implemented (`app/` + `backend/api/`) |
+| 03 | [GuardedExecutor](features/03_guarded_executor/README.md) | C | 1 | Implemented (`src/warden/executor.py`) |
+| 04 | [PolicyEngine](features/04_policy_engine/README.md) | C | 1 | Implemented (L0 static + L1 DeBERTa + L2 Clef) |
+| 05 | [HITL Approval and Re-entry](features/05_hitl_approval/README.md) | D | 1 | Implemented (durable store + inbox + re-entry) |
+| 06 | [Ops-Assistant Agent](features/06_ops_assistant_agent/README.md) | D | 1 | Implemented (`agent_engine.py` + governed chat) |
+| 07 | [SandboxPort](features/07_sandbox/README.md) | E | 1 | Implemented (Docker adapter + registry) |
+| 08 | [AuditJournal](features/08_audit_journal/README.md) | E | 1 | Implemented (hash-chained, idempotent) |
 | 09 | [PostgreSQL and Checkpoint](features/09_postgres_checkpoint/README.md) | F | 0 ✅ | Implemented |
-| 10 | [Guarded LLM Client and Telemetry](features/10_llm_client_telemetry/README.md) | F | 1 | Planned |
-| 11 | [Projections and Visibility](features/11_projections/README.md) | F | 1 | Planned |
-| 12 | [Auth and Approval Authorization](features/12_auth_approval/README.md) | B/C | 1 | Planned |
-| 13 | [Testing and Security Validation](features/13_testing_security/README.md) | All | All | Ongoing |
-| 14 | [Local Dev and Demo Readiness](features/14_local_dev_demo/README.md) | All | All | Ongoing |
+| 10 | [Guarded LLM Client and Telemetry](features/10_llm_client_telemetry/README.md) | F | 1 | Implemented (`src/warden/llm/`) |
+| 11 | [Projections and Visibility](features/11_projections/README.md) | F | 1 | Implemented (telemetry/inbox/decision-graph) |
+| 12 | [Auth and Approval Authorization](features/12_auth_approval/README.md) | B/C | 1 | Implemented (named keys + one-time claim) |
+| 13 | [Testing and Security Validation](features/13_testing_security/README.md) | All | All | Ongoing (40 modules, golden evals) |
+| 14 | [Local Dev and Demo Readiness](features/14_local_dev_demo/README.md) | All | All | Ongoing (see `SETUP.md`) |
 
 ---
 

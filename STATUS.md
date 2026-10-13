@@ -1,6 +1,6 @@
 # STATUS.md — Aegis: What's Built
 
-> Last updated: 2026-10-11
+> Last updated: 2026-10-13 — resynced with codebase (executor, journal, policy L0/L1/L2, grants, Docker sandbox, FastAPI + backend API, agent engine all present; 40 test modules, 217+ collectible tests).
 
 ---
 
@@ -9,7 +9,7 @@
 | Phase | Name | Status |
 |---|---|---|
 | 0 | Foundation | ✅ Done |
-| 1 | Core story (single ops-assistant agent) | 🔨 In progress |
+| 1 | Core story (single ops-assistant agent) | ✅ Largely built (executor, journal, policy, HITL, Docker sandbox, FastAPI, ops-assistant all present; hardening ongoing) |
 | 2 | Policy as a product | ⬜ Not started |
 | 3 | Multi-agent | ⬜ Not started |
 | 4 | Explainability polish | ⬜ Not started |
@@ -117,26 +117,20 @@ Reusable interactive CLI for any compiled LangGraph graph:
 
 ---
 
-## What's NOT Built Yet (Phase 1 remaining)
+## What's NOT Built Yet (remaining hardening)
 
-- `GuardedExecutor` (`executor.py`) — the core seam
-- `AuditJournal` (`journal.py`) — append-only event store + write-ahead
-- `PolicyEngine` (`policy/engine.py`) — allow / escalate / deny evaluation
-- HITL re-entry helper (`hitl/runner.py` → `run_gated`)
-- `SandboxPort` (`sandbox.py`) — subprocess adapter
-- LLM client adapter (`llm.py`)
-- Projections: telemetry, inbox, decision graph (`projections/`)
-- FastAPI app (`app/`) + all HTTP endpoints
-- Ops-assistant agent graph (`agents/ops_assistant.py`)
-- Postgres migrations + pgvector setup
-- Seed policies
+- Postgres-backed `AuditJournal` persistence + pgvector policy retrieval (in-memory + SQLite approvals + file-backed grants are live; Postgres WAL/audit decorators landed, full migration still pending)
+- Policy CRUD UI polish + live rule-edit demo (engine + versions design done, editor UX partial)
+- Multi-agent leaderboard / run-comparison views (agent registry + second agent present, comparison views partial)
+- Decision-graph / run-replay UI polish (projections + timeline present, polish pending)
+
+Previously listed here but NOW BUILT (verified 2026-10-13): `GuardedExecutor` (`src/warden/executor.py`), `AuditJournal` (`src/warden/journal.py` — hash-chained, idempotent, secret-redacting), `PolicyEngine` (`src/warden/policy/engine.py` — L0 static + L1 DeBERTa + L2 Clef), HITL re-entry + durable approvals (`src/warden/hitl/approvals.py`, `app/` + `backend/api/inbox.py`), `SandboxPort` Docker adapter (`src/warden/sandbox/docker.py` + `registry.py` + `port.py`), LLM client adapter (`src/warden/llm/` — budget, pricing, rate-limit, Groq/OpenAI), projections (`src/warden/projections/`), FastAPI app (`app/main.py` + `backend/api/`) with dashboard/approvals/chat/grants/policies/sandbox/traces endpoints, ops-assistant + multi-agent engine (`src/warden/agent_engine.py`, `src/warden/tools/`), user grants (`src/warden/grants.py`, `app/grants.py`).
 
 ---
 
 ## Test & Quality Status
 
 ```
-pytest   →  22 passed (12 checkpoint + 4 cli loop + 6 redact)
-mypy     →  0 errors (strict mode, 12 files)
-PR #1    →  OPEN, CodeRabbit pass, GitGuardian pass, merge state CLEAN
+pytest   →  217+ collectible tests across 40 modules (kernel: executor/policy/grants/HITL/sandbox/LLM all covered; app/backend integration covered where deps installed)
+mypy     →  strict mode over src, tests, backend, frontend (see pyproject.toml)
 ```
