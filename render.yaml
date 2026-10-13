@@ -1,0 +1,36 @@
+# render.yaml — Aegis on Render (no managed Postgres; BYO external DB)
+#
+# Expects an EXTERNAL Postgres (team-hosted, pgvector extension on) whose
+# connection string is pasted into the dashboard as CONNECTION_STRING.
+# Journal + LangGraph checkpointer tables are created idempotently on boot.
+#
+# Constraints baked in:
+# - workers = 1: pending HITL gates live in memory; scale past 1 only after
+#   the inbox becomes a journal projection (lock 3 follow-through).
+# - Ephemeral disk: WARDEN_SANDBOX_WORKSPACE is scratch; restarts wipe it.
+# - Sandbox backend = subprocess (no Docker daemon on Render).
+
+services:
+  - type: web
+    name: aegis
+    env: python
+    buildCommand: pip install -e .
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: CONNECTION_STRING
+        sync: false
+      - key: WARDEN_SANDBOX_BACKEND
+        value: subprocess
+      - key: WARDEN_SANDBOX_WORKSPACE
+        value: /tmp/aegis-workspace
+      - key: WARDEN_APPROVER_KEYS
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: OPENAI_API_KEY
+        sync: false

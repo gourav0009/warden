@@ -35,14 +35,16 @@ def make_runner(monkeypatch: pytest.MonkeyPatch, **kwargs: Any) -> GovernedRunne
         return SandboxResult(ok=True, exit_code=0, stdout="stubbed", stderr="",
                              timed_out=False, duration_ms=1, profile="fake")
     monkeypatch.setattr("warden.tools.sandbox_tools.run_shell", fake_shell)
-    # Route exec_shell through the fake by patching DockerSandbox
+    # Route exec_shell through the fake by patching the sandbox factory
     class FakeDocker:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
         async def run(self, action: Any) -> SandboxResult:
             return SandboxResult(ok=True, exit_code=0, stdout="stubbed", stderr="",
                                  timed_out=False, duration_ms=1, profile="fake")
-    monkeypatch.setattr("governed_demo.DockerSandbox", FakeDocker)
+    monkeypatch.setattr(
+        "governed_demo.create_sandbox", lambda **kwargs: FakeDocker(**kwargs)
+    )
     return runner
 
 

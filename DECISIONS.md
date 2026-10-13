@@ -82,3 +82,22 @@ Previously, actions like `DROP TABLE` or batch file deletion were blanket termin
 - Without a grant, actions park to `Pending` (`GATE_REQUESTED`).
 - Audit timeline renders grant events (`grant_issued`, `grant_consumed`, `grant_revoked`, `grant_expired`) in causal sequence.
 - Documented in `docs/superpowers/specs/2026-10-12-user-grants-design.md` and `CONTEXT.md`.
+
+---
+
+## 4. Lock 7 scoped for hosting — subprocess backend, Docker opt-in (2026-10-13)
+
+**Status:** Accepted. **Amends:** lock 7 / entry 1 ("Docker is the only containment adapter").
+
+**Decision.** The sandbox gains a backend switch (`WARDEN_SANDBOX_BACKEND`, `Settings.sandbox_backend`, default `subprocess`). `create_sandbox()` resolves `docker` → `DockerSandbox`, `subprocess` → new `SubprocessSandbox` (host process: workspace cwd, scrubbed env, profile timeout, 64 KiB output cap), anything else → `SandboxUnavailable` (fail-closed, executor maps to `Error(governance_unavailable)`). Default `run_shell` path and `render.yaml` use subprocess; Docker stays for local use via env opt-in.
+
+**Context.** Render (and Vercel-class hosts) provide no Docker daemon, so entry 1's Docker-only rule makes the app undeployable there. The hosted demo needs tool execution without containers.
+
+**Alternatives considered.**
+- *Keep Docker-only, host elsewhere with a daemon* — rejected: team asked for Render/Vercel-class hosting.
+- *Delete Docker adapter outright* — rejected: local network-isolation story is still the honest containment claim for judges; keep both, select per environment.
+
+**Consequences.**
+- The subprocess path makes NO network-isolation claim (best-effort cwd jail + timeout + secret scrub only). Demo copy must not present it as container containment.
+- `SandboxPort` interface unchanged; unknown tool profiles still refused; `execute()` never raises for environmental reasons (locks 2/4 preserved).
+- `render.yaml` pins `--workers 1` (pending gates are in-memory) and ephemeral `/tmp/aegis-workspace`.

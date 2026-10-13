@@ -7,7 +7,7 @@ write-ahead journaling -> PolicyEngine verdict -> HITL approval on escalate
 
 Locks honored: Pending is data (lock 2), DENY terminal (lock 5), fail-closed
 Error on infra failure (lock 4), LLM crosses the seam with usage journaled
-(lock 1), DockerSandbox containment (lock 7).
+(lock 1), configured sandbox backend containment (lock 7).
 
 Run:  uv run python scripts/governed_demo.py [--auto-approve NAME] [--out DIR]
 """
@@ -53,7 +53,7 @@ from warden.models import (  # noqa: E402
     Pending,
 )
 from warden.policy.engine import PolicyDecision, PolicyEngine  # noqa: E402
-from warden.sandbox.docker import DockerSandbox  # noqa: E402
+from warden.sandbox import create_sandbox  # noqa: E402
 from warden.sandbox.port import SandboxUnavailable  # noqa: E402
 from warden.tools import base as tools_base  # noqa: E402
 from warden.tools import deny_tools, hitl_tools, safe_tools, sandbox_tools  # noqa: E402
@@ -353,7 +353,7 @@ class GovernedRunner:
                 except PermissionError as exc:
                     return Denied(reason=str(exc), policy="path-acl")
             elif tool == "exec_shell":
-                sandbox = DockerSandbox(workspace_path=settings.sandbox_workspace)
+                sandbox = create_sandbox(workspace_path=settings.sandbox_workspace)
                 result = await sandbox.run(action)
                 result = {"ok": result.ok, "exit_code": result.exit_code,
                           "stdout": result.stdout[:500], "profile": result.profile,
