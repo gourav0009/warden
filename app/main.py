@@ -17,12 +17,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from app.agents import router as agents_router
 from app.audit import router as audit_router
+from app.chat import router as chat_router
+from app.grants import router as grants_router
+from app.leases import router as leases_router
 from app.llm import router as guarded_llm_router
 from app.policies import router as policies_router
-from app.leases import router as leases_router
-from app.traces import router as traces_router
 from app.sandbox import router as sandbox_router
-from app.chat import router as chat_router
+from app.traces import router as traces_router
 from backend.api.auth import router as auth_router
 from backend.api.health import router as health_api_router
 from backend.api.inbox import PENDING_GATES, router as inbox_api_router
@@ -44,6 +45,7 @@ STATIC_DIR = BASE_DIR / "static"
 app = FastAPI(title="Aegis AI Governance Console", version="2.0.0")
 app.include_router(agents_router)
 app.include_router(chat_router)
+app.include_router(grants_router)
 app.include_router(audit_router)
 app.include_router(policies_router)
 app.include_router(leases_router)

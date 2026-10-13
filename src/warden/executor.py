@@ -18,16 +18,22 @@ import inspect
 import logging
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import Any, Awaitable, Callable
+from datetime import datetime, timezone
+from typing import Any, Awaitable, Callable, Optional
 
+from warden.config import get_clef_client, get_groq_llm, settings
+from warden.grants import GrantsStore, get_grants_store
 from warden.journal import (
     AsyncAuditJournal,
     AuditJournal,
+    EventKind,
     InMemoryJournal,
     JournalEvent,
+    get_journal,
     redact_secrets_in_obj,
 )
-from warden.config import get_clef_client
+from warden.llm.client import GuardedLLMClient
+from warden.llm.types import LLMRequest
 from warden.models import (
     Action,
     ActionKind,
@@ -112,6 +118,8 @@ class GuardedExecutor:
         require_audit: bool = False,
         approval_store: Any | None = None,
         approver_keys: Any | None = None,
+        llm_provider: Any | None = None,
+        grants: Optional[GrantsStore] = None,
     ) -> None:
         self.journal = journal
         self.policy_engine: PolicyEngine | None
@@ -139,6 +147,7 @@ class GuardedExecutor:
         self.approval_store = approval_store
         self.approver_keys = approver_keys or {}
         self.require_audit = require_audit
+        self._grants = grants
 
     async def _append_journal_event(self, event: JournalEvent) -> None:
         if self.journal is None:
@@ -226,6 +235,12 @@ class GuardedExecutor:
             run_id=action.run_id,
             thread_id=action.thread_id,
         )
+
+    @property
+    def grants(self) -> GrantsStore:
+        if self._grants is None:
+            self._grants = get_grants_store()
+        return self._grants
 
     async def execute(
         self,
@@ -373,147 +388,212 @@ class GuardedExecutor:
         approval_id: str | None = None
         if policy_result.decision == PolicyDecision.ESCALATE:
             if approval is None:
-                # Secure binding: create the durable approval record first so
-                # its approval id can serve as the single gate identifier
-                # spanning store, journal, and GateRequest.
-                # The `approver_key` on the record names WHO is authorized to
-                # claim it (selected from the configured approver allowlist);
-                # it is not a caller-supplied identity.
+                # Check for covering active grant
+                covering_grant = self.grants.find_covering_grant(
+                    action.thread_id, action.name, action.payload
+                )
+                if covering_grant is not None:
+                    _, uses_left = self.grants.consume(covering_grant.id)
+                    if self.journal is not None:
+                        try:
+                            await self._append_journal_event(
+                                JournalEvent(
+                                    id=str(uuid.uuid4()),
+                                    run_id=action.run_id,
+                                    thread_id=action.thread_id,
+                                    action_id=action.id,
+                                    checkpoint_step=context_obj.checkpoint_step,
+                                    kind="grant_consumed",
+                                    actor="GuardedExecutor",
+                                    status="Consumed",
+                                    description=f"Grant {covering_grant.id} consumed for {action.name} ({uses_left} uses left)",
+                                    payload={
+                                        "grant_id": covering_grant.id,
+                                        "action_id": action.id,
+                                        "uses_left": uses_left,
+                                        "granted_by": covering_grant.granted_by,
+                                    },
+                                    ts=datetime.now(timezone.utc).isoformat(),
+                                )
+                            )
+                        except Exception as exc:
+                            logger.error("Journal grant_consumed failed: %s", exc)
+                            return Error(reason="governance_unavailable")
+                    # Grant covers action: proceed to execution without parking
+                else:
+                    # Secure binding: create the durable approval record first so
+                    # its approval id can serve as the single gate identifier
+                    # spanning store, journal, and GateRequest.
+                    # The `approver_key` on the record names WHO is authorized to
+                    # claim it (selected from the configured approver allowlist);
+                    # it is not a caller-supplied identity.
+                    if self.approval_store is not None:
+                        from warden.hitl.approvals import (
+                            ApprovalError,
+                            make_expiry,
+                        )
+
+                        try:
+                            if not self.approver_keys:
+                                # No approver allowlist configured: fail closed.
+                                return Error(reason="governance_unavailable")
+                            approver_key = sorted(self.approver_keys.keys())[0]
+                            approval_id = await self.approval_store.record(
+                                action=action,
+                                approver_key=approver_key,
+                                policy_identity=policy_result.policy_name or "default",
+                                expires_at=make_expiry(),
+                            )
+                        except ApprovalError:
+                            return Error(reason="governance_unavailable")
+                        except Exception:
+                            return Error(reason="governance_unavailable")
+
+                    gate_id = str(uuid.uuid4())
+                    if approval_id:
+                        gate_id = approval_id
+                    gate_req = GateRequest(
+                        gate_id=gate_id,
+                        action=action,
+                        context={
+                            "reason": policy_result.reason,
+                            "policy": policy_result.policy_name or "",
+                            "rule_id": action.payload.get("policy_id")
+                            or policy_result.policy_name
+                            or "",
+                        },
+                    )
+                    if self.journal is not None:
+                        try:
+                            await self._append_journal_event(
+                                JournalEvent(
+                                    id=str(uuid.uuid4()),
+                                    run_id=action.run_id,
+                                    thread_id=action.thread_id,
+                                    action_id=action.id,
+                                    checkpoint_step=context_obj.checkpoint_step,
+                                    kind="gate_requested",
+                                    actor=context_obj.actor,
+                                    payload={
+                                        "gate_id": gate_id,
+                                        "action_id": action.id,
+                                        "context": gate_req.context,
+                                        "requested_at": gate_req.requested_at.isoformat(),
+                                    },
+                                )
+                            )
+                        except Exception as exc:
+                            logger.error("Journal gate_requested failed: %s", exc)
+                            return Error(reason="governance_unavailable")
+                    # Do NOT invoke handler
+                    return Pending(gate_request=gate_req)
+
+            elif approval is not None:
+                # Approval passed: validate approval decision
+                if not isinstance(approval, GateDecision):
+                    return Error(reason="Invalid approval: expected GateDecision instance")
+
+                # Secure approval binding validation when a store is configured.
+                # A caller-supplied approved=True flag is not authorization:
+                # the decision must be claimed from the durable store, matched
+                # against the exact pending action (fingerprint incl. canonical
+                # payload hash), the approver allowlist, and expiry.
                 if self.approval_store is not None:
                     from warden.hitl.approvals import (
+                        ApprovalAlreadyClaimed,
                         ApprovalError,
-                        make_expiry,
+                        ApprovalExpired,
+                        ApprovalMismatch,
+                        ApprovalNotFound,
+                        ApprovalUnauthorized,
                     )
 
+                    claimed_ok = False
+                    decision_verdict = "approve" if (
+                        approval.verdict == GateVerdict.APPROVE
+                    ) else "deny"
                     try:
-                        if not self.approver_keys:
-                            # No approver allowlist configured: fail closed.
-                            return Error(reason="governance_unavailable")
-                        approver_key = sorted(self.approver_keys.keys())[0]
-                        approval_id = await self.approval_store.record(
+                        claimed_ok = await self.approval_store.claim(
+                            approval_id=approval.gate_id,
                             action=action,
-                            approver_key=approver_key,
+                            approver_key=approval.decided_by,
+                            decision=decision_verdict,
                             policy_identity=policy_result.policy_name or "default",
-                            expires_at=make_expiry(),
+                        )
+                    except ApprovalMismatch:
+                        return Denied(
+                            reason=(
+                                "Approval rejected: action binding (id/kind/name/"
+                                "run/thread/payload/policy) does not match the "
+                                "originally proposed action"
+                            ),
+                            policy="human_gate",
+                        )
+                    except ApprovalExpired:
+                        return Denied(
+                            reason="Approval rejected: approval has expired",
+                            policy="human_gate",
+                        )
+                    except ApprovalAlreadyClaimed:
+                        return Denied(
+                            reason=(
+                                "Approval rejected: duplicate or replayed "
+                                "approval claim"
+                            ),
+                            policy="human_gate",
+                        )
+                    except ApprovalNotFound:
+                        return Denied(
+                            reason="Approval rejected: unknown approval identifier",
+                            policy="human_gate",
+                        )
+                    except ApprovalUnauthorized:
+                        return Denied(
+                            reason=(
+                                f"Approval rejected: '{approval.decided_by}' is not "
+                                "an authorized approver for this approval"
+                            ),
+                            policy="human_gate",
                         )
                     except ApprovalError:
                         return Error(reason="governance_unavailable")
                     except Exception:
                         return Error(reason="governance_unavailable")
-
-                gate_id = str(uuid.uuid4())
-                if approval_id:
-                    gate_id = approval_id
-                gate_req = GateRequest(
-                    gate_id=gate_id,
-                    action=action,
-                    context={
-                        "reason": policy_result.reason,
-                        "policy": policy_result.policy_name or "",
-                        "rule_id": action.payload.get("policy_id")
-                        or policy_result.policy_name
-                        or "",
-                    },
-                )
-                if self.journal is not None:
-                    try:
-                        await self._append_journal_event(
-                            JournalEvent(
-                                id=str(uuid.uuid4()),
-                                run_id=action.run_id,
-                                thread_id=action.thread_id,
-                                action_id=action.id,
-                                checkpoint_step=context_obj.checkpoint_step,
-                                kind="gate_requested",
-                                actor=context_obj.actor,
-                                payload={
-                                    "gate_id": gate_id,
-                                    "action_id": action.id,
-                                    "context": gate_req.context,
-                                    "requested_at": gate_req.requested_at.isoformat(),
-                                },
-                            )
-                        )
-                    except Exception as exc:
-                        logger.error("Journal gate_requested failed: %s", exc)
+                    if not claimed_ok:
                         return Error(reason="governance_unavailable")
-                # Do NOT invoke handler
-                return Pending(gate_request=gate_req)
 
-            # Approval passed: validate approval decision
-            if not isinstance(approval, GateDecision):
-                return Error(reason="Invalid approval: expected GateDecision instance")
+                if approval.verdict == GateVerdict.DENY:
+                    if self.journal is not None:
+                        try:
+                            await self._append_journal_event(
+                                JournalEvent(
+                                    id=str(uuid.uuid4()),
+                                    run_id=action.run_id,
+                                    thread_id=action.thread_id,
+                                    action_id=action.id,
+                                    checkpoint_step=context_obj.checkpoint_step,
+                                    kind="gate_decided",
+                                    actor=approval.decided_by,
+                                    payload={
+                                        "gate_id": approval.gate_id,
+                                        "verdict": approval.verdict.value,
+                                        "reason": approval.reason,
+                                        "decided_by": approval.decided_by,
+                                    },
+                                )
+                            )
+                        except Exception as exc:
+                            logger.error("Journal gate_decided failed: %s", redact_secrets_in_obj(str(exc)))
+                            return Error(reason="governance_unavailable")
+                    return Denied(
+                        reason=f"Gate rejected by approver {approval.decided_by}: {approval.reason}",
+                        policy="human_gate",
+                    )
 
-            # Secure approval binding validation when a store is configured.
-            # A caller-supplied approved=True flag is not authorization:
-            # the decision must be claimed from the durable store, matched
-            # against the exact pending action (fingerprint incl. canonical
-            # payload hash), the approver allowlist, and expiry.
-            if self.approval_store is not None:
-                from warden.hitl.approvals import (
-                    ApprovalAlreadyClaimed,
-                    ApprovalError,
-                    ApprovalExpired,
-                    ApprovalMismatch,
-                    ApprovalNotFound,
-                    ApprovalUnauthorized,
-                )
+                if approval.verdict != GateVerdict.APPROVE:
+                    return Error(reason=f"Unknown gate verdict: {approval.verdict}")
 
-                claimed_ok = False
-                decision_verdict = "approve" if (
-                    approval.verdict == GateVerdict.APPROVE
-                ) else "deny"
-                try:
-                    claimed_ok = await self.approval_store.claim(
-                        approval_id=approval.gate_id,
-                        action=action,
-                        approver_key=approval.decided_by,
-                        decision=decision_verdict,
-                        policy_identity=policy_result.policy_name or "default",
-                    )
-                except ApprovalMismatch:
-                    return Denied(
-                        reason=(
-                            "Approval rejected: action binding (id/kind/name/"
-                            "run/thread/payload/policy) does not match the "
-                            "originally proposed action"
-                        ),
-                        policy="human_gate",
-                    )
-                except ApprovalExpired:
-                    return Denied(
-                        reason="Approval rejected: approval has expired",
-                        policy="human_gate",
-                    )
-                except ApprovalAlreadyClaimed:
-                    return Denied(
-                        reason=(
-                            "Approval rejected: duplicate or replayed "
-                            "approval claim"
-                        ),
-                        policy="human_gate",
-                    )
-                except ApprovalNotFound:
-                    return Denied(
-                        reason="Approval rejected: unknown approval identifier",
-                        policy="human_gate",
-                    )
-                except ApprovalUnauthorized:
-                    return Denied(
-                        reason=(
-                            f"Approval rejected: '{approval.decided_by}' is not "
-                            "an authorized approver for this approval"
-                        ),
-                        policy="human_gate",
-                    )
-                except ApprovalError:
-                    return Error(reason="governance_unavailable")
-                except Exception:
-                    return Error(reason="governance_unavailable")
-                if not claimed_ok:
-                    return Error(reason="governance_unavailable")
-
-            if approval.verdict == GateVerdict.DENY:
+                # Human approved: record gate_decided and proceed to execution
                 if self.journal is not None:
                     try:
                         await self._append_journal_event(
@@ -536,37 +616,6 @@ class GuardedExecutor:
                     except Exception as exc:
                         logger.error("Journal gate_decided failed: %s", redact_secrets_in_obj(str(exc)))
                         return Error(reason="governance_unavailable")
-                return Denied(
-                    reason=f"Gate rejected by approver {approval.decided_by}: {approval.reason}",
-                    policy="human_gate",
-                )
-
-            if approval.verdict != GateVerdict.APPROVE:
-                return Error(reason=f"Unknown gate verdict: {approval.verdict}")
-
-            # Human approved: record gate_decided and proceed to execution
-            if self.journal is not None:
-                try:
-                    await self._append_journal_event(
-                        JournalEvent(
-                            id=str(uuid.uuid4()),
-                            run_id=action.run_id,
-                            thread_id=action.thread_id,
-                            action_id=action.id,
-                            checkpoint_step=context_obj.checkpoint_step,
-                            kind="gate_decided",
-                            actor=approval.decided_by,
-                            payload={
-                                "gate_id": approval.gate_id,
-                                "verdict": approval.verdict.value,
-                                "reason": approval.reason,
-                                "decided_by": approval.decided_by,
-                            },
-                        )
-                    )
-                except Exception as exc:
-                    logger.error("Journal gate_decided failed: %s", redact_secrets_in_obj(str(exc)))
-                    return Error(reason="governance_unavailable")
 
         # Resolve tool handlers only after policy has allowed the action or
         # an operator has approved it. DENY and ESCALATE must not depend on

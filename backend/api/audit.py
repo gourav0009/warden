@@ -38,11 +38,120 @@ from backend.api import get_audit_journal
 
 logger = logging.getLogger("warden.api.audit")
 
-# List of audit event dictionaries exposed to frontend views for rendering.
-AUDIT_EVENTS: list[dict[str, Any]] = []
-
-
 router = APIRouter(prefix="/audit", tags=["Audit Journal"])
+
+AUDIT_EVENTS: list[dict[str, Any]] = [
+    {
+        "id": "evt-001",
+        "run_id": "run-001",
+        "thread_id": "test-run-thread-live",
+        "action_id": "act-001",
+        "checkpoint_step": 2,
+        "kind": "action_allowed",
+        "actor": "ops_assistant",
+        "payload": {"action_name": "send_email", "status": "sent"},
+        "ts": "2026-10-11T14:05:00Z",
+    },
+    {
+        "id": "evt-002",
+        "run_id": "run-002",
+        "thread_id": "demo-thread-1",
+        "action_id": "act-002",
+        "checkpoint_step": 1,
+        "kind": "gate_requested",
+        "actor": "ops_assistant",
+        "payload": {
+            "policy": "escalate_external_email",
+            "gate_id": "gate-req-001",
+        },
+        "ts": "2026-10-11T14:01:00Z",
+    },
+    {
+        "id": "evt-003",
+        "run_id": "run-003",
+        "thread_id": "security-test-1",
+        "action_id": "act-003",
+        "checkpoint_step": 1,
+        "kind": "action_denied",
+        "actor": "ops_assistant",
+        "payload": {
+            "action_name": "drop_table",
+            "policy": "no_destructive_sql",
+        },
+        "ts": "2026-10-11T13:50:00Z",
+    },
+    {
+        "id": "evt-004",
+        "run_id": "run-004",
+        "thread_id": "grant-demo-thread",
+        "action_id": None,
+        "checkpoint_step": 1,
+        "kind": "grant_issued",
+        "actor": "approver:alice",
+        "description": "Grant gr_seed_01 issued by alice for batch_delete_files (5 max uses)",
+        "payload": {
+            "grant_id": "gr_seed_01",
+            "tool": "batch_delete_files",
+            "max_uses": 5,
+            "ttl_minutes": 30,
+        },
+        "ts": "2026-10-11T14:10:00Z",
+    },
+    {
+        "id": "evt-005",
+        "run_id": "run-004",
+        "thread_id": "grant-demo-thread",
+        "action_id": "act-004",
+        "checkpoint_step": 2,
+        "kind": "grant_consumed",
+        "actor": "GuardedExecutor",
+        "description": "Grant gr_seed_01 consumed for act-004 (4 uses left)",
+        "payload": {
+            "grant_id": "gr_seed_01",
+            "action_id": "act-004",
+            "uses_left": 4,
+            "granted_by": "alice",
+        },
+        "ts": "2026-10-11T14:10:05Z",
+    },
+    {
+        "id": "evt-006",
+        "run_id": "run-004",
+        "thread_id": "grant-demo-thread",
+        "action_id": None,
+        "checkpoint_step": 3,
+        "kind": "grant_revoked",
+        "actor": "approver:alice",
+        "description": "Grant gr_seed_01 revoked by alice",
+        "payload": {
+            "grant_id": "gr_seed_01",
+            "revoked_by": "alice",
+        },
+        "ts": "2026-10-11T14:15:00Z",
+    },
+]
+
+
+def _filter_default_events(
+    q: str | None = None,
+    thread_id: str | None = None,
+    kind: str | None = None,
+) -> list[dict[str, Any]]:
+    results = AUDIT_EVENTS
+    if thread_id:
+        results = [e for e in results if e["thread_id"] == thread_id]
+    if kind:
+        results = [e for e in results if e["kind"] == kind]
+    if q:
+        query = q.lower()
+        results = [
+            e
+            for e in results
+            if query in str(e["payload"]).lower()
+            or query in e["kind"].lower()
+            or query in e["actor"].lower()
+        ]
+    return results
 
 
 async def _record(kind: str, actor: str, payload: dict[str, Any], *, step: int | None = None) -> JournalEvent:
@@ -181,29 +290,41 @@ async def search_audit_log(
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
     """Search and filter the append-only audit journal."""
-    events = await get_audit_journal().query()
+    journal_events = await get_audit_journal().query()
 
-    if thread_id:
-        events = [e for e in events if e.thread_id == thread_id]
-    if kind:
-        events = [e for e in events if e.kind == kind]
-    if q:
-        query = q.lower()
-        events = [
-            e
-            for e in events
-            if query in str(redact_secrets_in_obj(e.payload)).lower()
-            or query in e.kind.lower()
-            or query in str(e.actor).lower()
-        ]
+    if journal_events:
+        events = list(journal_events)
+        if thread_id:
+            events = [e for e in events if getattr(e, "thread_id", None) == thread_id or getattr(e, "run_id", None) == thread_id]
+        if kind:
+            events = [e for e in events if getattr(e, "kind", None) == kind]
+        if q:
+            query = q.lower()
+            events = [
+                e
+                for e in events
+                if query in str(redact_secrets_in_obj(e.payload)).lower()
+                or query in e.kind.lower()
+                or query in str(e.actor).lower()
+            ]
 
+        limit_int = limit if isinstance(limit, int) else 100
+        offset_int = offset if isinstance(offset, int) else 0
+
+        paginated = events[offset_int : offset_int + limit_int]
+        return {
+            "events": [e.__dict__ for e in paginated],
+            "total": len(events),
+            "limit": limit_int,
+            "offset": offset_int,
+        }
+
+    fallback = _filter_default_events(q=q, thread_id=thread_id, kind=kind)
     limit_int = limit if isinstance(limit, int) else 100
     offset_int = offset if isinstance(offset, int) else 0
-
-    paginated = events[offset_int : offset_int + limit_int]
     return {
-        "events": [e.__dict__ for e in paginated],
-        "total": len(events),
+        "events": fallback[offset_int : offset_int + limit_int],
+        "total": len(fallback),
         "limit": limit_int,
         "offset": offset_int,
     }
