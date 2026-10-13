@@ -1,6 +1,8 @@
 # ARCHITECTURE.md — Aegis
 
 AI Agent Governance & Human Accountability System. Full system design — the shared understanding from the design grilling. Decisions are in `CONTEXT.md`; build order is in `ROADMAP.md`.
+![Architecture](docs/images/arch.png)
+![Architecture](docs/images/PolicyEngine.png)
 
 ## 1. What Aegis is
 
