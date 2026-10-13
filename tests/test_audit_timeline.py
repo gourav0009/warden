@@ -116,17 +116,6 @@ def test_grant_using_thread_decision_graph_causal_order() -> None:
         assert edges[i]["to"] == nodes[i + 1]["id"]
 
 
-def test_run_detail_renders_grant_timeline() -> None:
-    res = client.get("/runs/grant-demo-thread")
-    assert res.status_code == 200
-    html = res.text.lower()
-    # Verifies grant timeline items render
-    assert "timeline events" in html
-    assert "grant_issued" in html
-    assert "grant_consumed" in html
-    assert "grant_revoked" in html
-
-
 def test_dynamic_grant_lifecycle_decision_graph_causal_order() -> None:
     from app.audit import JOURNAL_STORE
     import uuid

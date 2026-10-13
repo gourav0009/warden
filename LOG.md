@@ -353,3 +353,23 @@ Checks after push: CodeRabbit pass, GitGuardian pass, merge=CLEAN, not behind.
 
 ### Next
 - Wire the HITL re-entry helper (`run_gated` in `warden/hitl/runner.py`) on top of this + AuditJournal write-ahead (lock 2/3).
+
+## 2026-10-13 - Grants/Leases browser tests on app/ UI (latest main e65b3a3)
+
+**Status:** Done (grants 24 passed + e2e 3 passed; 14/14 app routes 200; grant issue/revoke + lease issue/revoke verified live on background server :8100)
+
+- Pulled main (b89e4c4 -> e65b3a3, Grants PR #40); discarded local impeccable live-script edit to base.html.
+- Server runs as background service: .venv Scripts uvicorn app.main:app on 127.0.0.1:8100 (app/ dir UI, not frontend/ dir).
+- Browser (preview tab): Command Center, Interception Gate, Guarded LLM, User Grants dialog (issued grant thread_browser_test_01 live, persisted active), leases pages all render.
+- Headless checks: POST /grants 201, ttl/missing-thread 422s, revoke flips to revoked; POST /leases creates LSE-*, revoke flips to REVOKED, bad id 404.
+- Venv edge case: pydantic_core ImportError recurred (dual dist-infos, missing RECORD). Fixed via stop-server + uv pip install --force-reinstall pydantic-core; server restarted clean. Never run uv sync/install while uvicorn holds the .pyd.
+
+## 2026-10-13 - Fixed console 404s: favicon + implemented legacy frontend /partials endpoints
+
+**Status:** Done (10 new regression tests; 65 passed across test_web/test_app_llm_ui/test_audit_timeline/test_governance_pages; mypy clean 95 files; live server log shows zero 404s)
+
+- Root causes: (1) no favicon anywhere - every page load logged GET /favicon.ico 404; (2) frontend/templates dashboard+runs+run_detail polled/posted 7 /partials/* endpoints that were never implemented.
+- Fix: app/static + frontend/static favicon.svg, rel=icon links in both base.html, /favicon.ico routes in app/main.py and backend/main.py.
+- Implemented in frontend/views.py wrapping existing backend services: GET /partials/telemetry/stats, /partials/runs/table, /partials/llm/stream (new partials/*.html fragments reusing dashboard markup); POST /partials/runs/create and /runs/{id}/resume return 204+HX-Refresh (400 empty prompt/bad decision, 404 unknown thread); POST /partials/llm/estimate|invoke render result slot HTML (DENY/pending/ok/error branches).
+- Refactor: dashboard stats/runs derivation extracted to _dashboard_stats()/_dashboard_recent_runs(); dashboard now also passes recent_llm_records (stream table was always empty-state before).
+- Note: user deleted src/warden/projections/ (was empty __init__.py) during session - intentional, left as-is.

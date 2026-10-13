@@ -41,7 +41,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.mypy]
-files = ["src", "tests", "backend", "frontend"]
+files = ["src", "tests", "backend", "app"]
 python_version = "3.11"
 strict = true
 warn_return_any = true

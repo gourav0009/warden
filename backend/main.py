@@ -1,13 +1,13 @@
-"""Aegis application server uniting backend REST API and frontend Jinja/HTMX views."""
+"""Aegis backend server: REST API plus the Aegis console pages from app/."""
 
 from __future__ import annotations
 
 import sys
 import asyncio
-import os
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 if sys.platform == "win32":
@@ -29,29 +29,19 @@ from backend.api.telemetry import router as telemetry_router
 from backend.api.policies import router as policies_router
 from backend.api.auth import router as auth_router
 from backend.api.llm import router as llm_router
-from frontend.views import router as frontend_router
 
 from app.agents import router as agents_router
 from app.audit import router as aegis_audit_router
 from app.chat import router as chat_router
 from app.grants import router as grants_router
 from app.leases import router as leases_router
+from app.llm import router as guarded_llm_router
 from app.main import get_approvals, get_blast_radius
 from app.policies import router as aegis_policies_router
 from app.sandbox import router as sandbox_router
 from app.traces import router as traces_router
 
-_FRONTEND_STATIC_DIR = _ROOT_DIR / "frontend" / "static"
 _APP_STATIC_DIR = _ROOT_DIR / "app" / "static"
-
-
-class MultiDirStaticFiles(StaticFiles):
-    """StaticFiles mount searching multiple directories in priority order."""
-
-    def __init__(self, directories: list[Path], **kwargs: Any) -> None:
-        valid_dirs: list[str | os.PathLike[str]] = [str(d.resolve()) for d in directories if d.exists()]
-        super().__init__(directory=valid_dirs[0] if valid_dirs else None, **kwargs)
-        self.all_directories = valid_dirs
 
 
 def create_app() -> FastAPI:
@@ -62,10 +52,8 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
-    # Mount static assets from frontend and app
-    static_dirs = [d for d in (_FRONTEND_STATIC_DIR, _APP_STATIC_DIR) if d.exists()]
-    if static_dirs:
-        app.mount("/static", MultiDirStaticFiles(directories=static_dirs), name="static")
+    # Mount static assets from the Aegis console (app/)
+    app.mount("/static", StaticFiles(directory=str(_APP_STATIC_DIR)), name="static")
 
     # Mount backend API routes under /api
     app.include_router(health_router, prefix="/api")
@@ -81,11 +69,9 @@ def create_app() -> FastAPI:
     # Also mount health/ready at root per standard Kubernetes/container probes
     app.include_router(health_router)
 
-    # Mount frontend HTML page routes at root
-    app.include_router(frontend_router)
-
-    # Mount Aegis interactive chat and governance views
+    # Mount Aegis interactive chat and governance views (app/ console pages)
     app.include_router(chat_router)
+    app.include_router(guarded_llm_router)
     app.include_router(grants_router)
     app.include_router(agents_router)
     app.include_router(leases_router)
@@ -93,6 +79,19 @@ def create_app() -> FastAPI:
     app.include_router(sandbox_router)
     app.include_router(aegis_audit_router)
     app.include_router(aegis_policies_router)
+
+    # Serve the Aegis shield icon so browsers never log a favicon 404.
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon_page() -> FileResponse:
+        return FileResponse(
+            _APP_STATIC_DIR / "favicon.svg", media_type="image/svg+xml"
+        )
+
+    # The legacy standalone console was removed; send root visitors to the
+    # interactive API docs instead of a bare 404.
+    @app.get("/", include_in_schema=False)
+    def root_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/docs", status_code=307)
 
     # Mount Aegis action review endpoints
     @app.get("/approvals")

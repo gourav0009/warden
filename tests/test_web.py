@@ -1,4 +1,4 @@
-"""Tests for backend REST API endpoints and frontend Jinja/HTMX views."""
+"""Tests for backend REST API endpoints and Aegis console pages."""
 
 from __future__ import annotations
 
@@ -28,16 +28,22 @@ def test_api_health() -> None:
     assert res.json() == {"status": "ok"}
 
 
-def test_dashboard_explains_missing_provider_configuration(
+def test_backend_root_redirects_to_docs() -> None:
+    res = client.get("/", follow_redirects=False)
+    assert res.status_code == 307
+    assert res.headers["location"] == "/docs"
+
+
+def test_llm_page_explains_missing_provider_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("app.llm.is_groq_configured", lambda: False)
 
-    response = client.get("/")
+    response = primary_client.get("/llm")
 
     assert response.status_code == 200
-    assert "OpenAI provider is not configured." in response.text
-    assert "restart the backend" in response.text
+    assert "Groq is not configured." in response.text
+    assert "GROQ_API_KEY" in response.text
 
 
 @pytest.mark.asyncio
@@ -243,50 +249,32 @@ def test_api_policies_crud() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Frontend Views HTML Tests
+# Aegis Console HTML Tests (app/ pages served by the backend app)
 # ---------------------------------------------------------------------------
 
 
-def test_frontend_dashboard_view() -> None:
-    res = client.get("/")
-    assert res.status_code == 200
-    assert "text/html" in res.headers["content-type"]
-    assert "Operator Dashboard" in res.text
-    assert "Aegis" in res.text
-
-
-def test_frontend_inbox_view() -> None:
+def test_console_inbox_view() -> None:
     res = client.get("/inbox")
     assert res.status_code == 200
-    assert "Operator Approval Inbox" in res.text
+    assert "Interception Gate" in res.text
 
 
-def test_frontend_runs_and_detail_view() -> None:
-    res = client.get("/runs")
-    assert res.status_code == 200
-    assert "Agent Execution Runs" in res.text
-
-    res_detail = client.get("/runs/test-thread-detail")
-    assert res_detail.status_code == 200
-    assert "test-thread-detail" in res_detail.text
-
-
-def test_frontend_audit_view() -> None:
+def test_console_audit_view() -> None:
     res = client.get("/audit")
     assert res.status_code == 200
-    assert "Audit Journal Explorer" in res.text
+    assert "WAL & Audit Log" in res.text
 
 
-def test_frontend_policies_view() -> None:
+def test_console_policies_view() -> None:
     res = client.get("/policies")
     assert res.status_code == 200
-    assert "Governance Policies" in res.text
+    assert "L1 & L2 Policy Governance" in res.text
 
 
-def test_frontend_static_css() -> None:
+def test_console_static_css() -> None:
     res = client.get("/static/css/warden.css")
     assert res.status_code == 200
-    assert "var(--bg-primary)" in res.text
+    assert "IBM Plex Mono" in res.text
 
 
 # ---------------------------------------------------------------------------
@@ -482,3 +470,21 @@ def test_primary_app_guarded_llm_partials() -> None:
     assert estimate.status_code == 200
     assert "Preflight estimate" in estimate.text
     assert "No provider call was made" in estimate.text
+
+
+# ---------------------------------------------------------------------------
+# Favicon regression test (browsers request /favicon.ico on every page load)
+# ---------------------------------------------------------------------------
+
+
+def test_favicon_served_without_404() -> None:
+    for http_client in (client, primary_client):
+        res = http_client.get("/favicon.ico")
+        assert res.status_code == 200
+
+
+def test_base_template_declares_favicon() -> None:
+    from pathlib import Path
+
+    template = Path(__file__).resolve().parent.parent / "app" / "templates" / "base.html"
+    assert 'rel="icon"' in template.read_text(encoding="utf-8")
